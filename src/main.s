@@ -30,8 +30,42 @@
 .endproc
 
 .proc nmi
-   jsr   drawPaddles
-   rti
+   LDA #$00
+   STA $2003       ; set the low byte (00) of the RAM address
+   LDA #$02
+   STA $4014       ; set the high byte (02) of the RAM address, start the transfer
+
+
+LatchController:
+   LDA #$01
+   STA $4016
+   LDA #$00
+   STA $4016       ; tell both the controllers to latch buttons
+
+
+ReadA: 
+   LDA $4016       ; player 1 - A
+   AND #%00000001  ; only look at bit 0
+   BEQ ReadADone   ; branch to ReadADone if button is NOT pressed (0)
+                  ; add instructions here to do something when button IS pressed (1)
+   LDA $0203       ; load sprite X position
+   CLC             ; make sure the carry flag is clear
+   ADC #$01        ; A = A + 1
+   STA $0203       ; save sprite X position
+ReadADone:        ; handling this button is done
+  
+
+ReadB: 
+   LDA $4016       ; player 1 - B
+   AND #%00000001  ; only look at bit 0
+   BEQ ReadBDone   ; branch to ReadBDone if button is NOT pressed (0)
+                  ; add instructions here to do something when button IS pressed (1)
+   LDA $0203       ; load sprite X position
+   SEC             ; make sure carry flag is set
+   SBC #$01        ; A = A - 1
+   STA $0203       ; save sprite X position
+ReadBDone:        ; handling this button is done
+   RTI
 .endproc
 
 .proc reset
@@ -71,7 +105,10 @@ clear_zp:
   ; the most basic sound engine possible
   lda #$0F
   sta $4015
-
+  jsr initgraphics
+  jsr initinput
+  jsr initsound
+  
   ; Wait for the PPU to warm up (part 2 of 2)
 vwait2:
   bit PPUSTATUS
@@ -86,16 +123,58 @@ vwait2:
   lda #0
   sta PPUSCROLL
   sta PPUSCROLL
-  lda #VBLANK_NMI|BG_1000
+  lda #VBLANK_NMI|BG_1000|OBJ_1000
   sta PPUCTRL
-  lda #BG_ON
+  lda #BG_ON|OBJ_ON
   sta PPUMASK
 
 
 mainLoop:
-  jmp mainLoop
+   
+   jmp mainLoop
 .endproc
 
+
+.proc initgraphics
+LoadPalettes:
+   LDA $2002             ; read PPU status to reset the high/low latch
+   LDA #$3F
+   STA $2006             ; write the high byte of $3F00 address
+   LDA #$00
+   STA $2006             ; write the low byte of $3F00 address
+   LDX #$00              ; start out at 0
+LoadPalettesLoop:
+   LDA palette, x        ; load data from address (palette + the value in x)
+                          ; 1st time through loop it will load palette+0
+                          ; 2nd time through loop it will load palette+1
+                          ; 3rd time through loop it will load palette+2
+                          ; etc
+   STA $2007             ; write to PPU
+   INX                   ; X = X + 1
+   CPX #$20              ; Compare X to hex $10, decimal 16 - copying 16 bytes = 4 sprites
+   BNE LoadPalettesLoop  ; Branch to LoadPalettesLoop if compare was Not Equal to zero
+                        ; if compare was equal to 32, keep going down
+
+
+LoadSprites:
+   LDX #$00              ; start at 0
+LoadSpritesLoop:
+   LDA sprites, x        ; load data from address (sprites +  x)
+   STA $0200, x          ; store into RAM address ($0200 + x)
+   INX                   ; X = X + 1
+   CPX #$20              ; Compare X to hex $20, decimal 32
+   BNE LoadSpritesLoop   ; Branch to LoadSpritesLoop if compare was Not Equal to zero
+                        ; if compare was equal to 32, keep going down
+   rts
+.endproc
+
+.proc initinput
+   rts
+.endproc
+
+.proc initsound
+   rts
+.endproc
 
 .proc cls
   lda #VBLANK_NMI
@@ -123,15 +202,7 @@ mainLoop:
 .endproc
 
 .proc drawPaddles
-   LDA   #$50
-   STA   SPRITE0Y
-   STA   SPRITE0X
-   
-   LDA   #$02
-   STA   SPRITE0TILEID
-   LDA   #$33
-   STA   SPRITE0ATTR
-   
+
    rts
 .endproc
 
@@ -221,4 +292,19 @@ onPlayer:
    .byt "1 Player",0
 twoPlayers:
    .byt "2 Players",0
+palette:
+   .byt  $0F,$31,$32,$33,$34,$35,$36,$37,$38,$39,$3A,$3B,$3C,$3D,$3E,$0F
+   .byt  $0F,$1C,$15,$14,$31,$02,$38,$3C,$0F,$1C,$15,$14,$31,$02,$38,$3C
+
+sprites:
+   .byt  $80,$02,$00,$80   ; ball?
+   .byt  $60,$04,$00,$10   ; paddle1 top
+   .byt  $68,$05,$00,$10   ; paddle1 mid
+   .byt  $70,$03,$00,$10   ; paddle1 bot
+   .byt  $80,$04,$00,$E0   ; paddle2 top
+   .byt  $88,$05,$00,$E0
+   .byt  $90,$03,$00,$E0   ; paddle2 bot
+   .byt  $F0,$02,$00,$88   ; paddle2 bot
+   .byt  $F0,$02,$00,$88   ; paddle2 bot
+   .byt  $F0,$02,$00,$88   ; paddle2 bot
 
