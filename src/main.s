@@ -51,9 +51,13 @@ playerspeed: .res 1
 .endproc
 
 .proc nmi
-
-   JSR   readControllers
+   LDA #$00
+   STA $2003       ; set the low byte (00) of the RAM address
+   LDA #$02
+   STA $4014       ; set the high byte (02) of the RAM address, start the transfer
+   
    JSR   drawSprites
+   JSR   readControllers
    
    INC   nmi_count
    RTI
@@ -96,7 +100,6 @@ ReadController2Loop:
    STA   ballspeedy
    STA   playerspeed
    
-   
    LDA   #$40
    STA   bally
    LDA   #$80
@@ -116,18 +119,13 @@ ReadController2Loop:
    LDA   #$50
    STA   paddle1bot
    STA   paddle2bot
-
+   NOP
    ;; osv
-   rts
+   RTS
 .endproc
 
 ;;; Update sprite positions
 .proc drawSprites
-   LDA #$00
-   STA $2003  ; set the low byte (00) of the RAM address
-   LDA #$02
-   STA $4014  ; set the high byte (02) of the RAM address, start the transfer
-
    LDA   bally
    STA   $0200
    LDA   ballx
@@ -187,16 +185,15 @@ clear_zp:
   ; the most basic sound engine possible
   lda #$0F
   sta $4015
-  
-  JSR fillInitialData
-  jsr initgraphics
-
-  
+ 
   ; Wait for the PPU to warm up (part 2 of 2)
 vwait2:
   bit PPUSTATUS
   bpl vwait2
 
+  JSR fillInitialData
+  JSR initgraphics
+  
   ; prints some text on the screen. not
   jsr drawText
 
@@ -212,8 +209,8 @@ vwait2:
 
 mainLoop:            ;;;;;;; MAIN LOOP
 
-   ;JSR   check_input
-   ;JSR   update_ball
+   JSR   check_input
+   JSR   update_ball
    JSR   wait_nmi
    
    jmp   mainLoop
@@ -230,16 +227,43 @@ mainLoop:            ;;;;;;; MAIN LOOP
    ADC ballspeedx        ;;ballx position = ballx + ballspeedx
    STA ballx
 
+   
    LDA ballx
    CMP #RIGHTWALL
-   BCC MoveBallRightDone      ;;if ball x < right wall, still on screen, skip next section
+   BCC p2trythit      ;;if ball x < right wall, still on screen, skip next section
    LDA #$00
    STA ballright
    LDA #$01
    STA ballleft         ;;bounce, ball now moving left
    ;;in real game, give point to player 1, reset ball
+   JMP   MoveBallRightDone
+   
+   ; check against player 2
+   ; IF Y > paddle1bot
+   ; IF Y < paddle1top
+   ;  maybe hit
+p2trythit:
+   LDA   paddle2bot
+   CLC
+   ADC   #$08
+   CMP   bally
+   BCC   p2nohit
+   LDA   paddle2top
+   CMP   bally
+   BEQ   p2maybehit
+   BCS   p2nohit
+p2maybehit:
+   LDA   #PADDLE2X
+   CMP   ballx
+   BCC   p2nohit
+   LDA   #$01
+   STA   ballleft
+   LDA   #$00
+   STA   ballright
+p2nohit:
+  
 MoveBallRightDone:
-
+      
 ;MoveBallLeft:
    LDA   ballleft
    BEQ   MoveBallLeftDone
@@ -248,16 +272,86 @@ MoveBallRightDone:
    SEC
    SBC   ballspeedx
    STA   ballx
+   
+   ; check against player 1
+   ; IF Y > paddle1bot
+   ; IF Y < paddle1top
+   ;  maybe hit
 
    LDA   ballx
    CMP   #LEFTWALL
-   BCS   MoveBallLeftDone  ;; if ball x > left wall, still on screen, skip
+   BCS   p1trythit  ;; if ball x > left wall, still on screen, skip
    LDA   #$01
    STA   ballright
    LDA   #$00
    STA   ballleft
    ; hit left wall, point for player 2
+   JMP   MoveBallLeftDone
+   
+   ; check against player 1
+   ; IF Y > paddle1bot
+   ; IF Y < paddle1top
+   ;  maybe hit
+p1trythit:
+   LDA   paddle1bot
+   CLC
+   ADC   #$08
+   CMP   bally
+   BCC   p1nohit
+   LDA   paddle1top
+   CMP   bally
+   BEQ   p1maybehit
+   BCS   p1nohit
+p1maybehit:
+   LDA   #PADDLE1X
+   CMP   ballx
+   BEQ   p1hit
+   BCS   p1nohit
+p1hit:
+   LDA   #$01
+   STA   ballright
+   LDA   #$00
+   STA   ballleft
+p1nohit:
 MoveBallLeftDone:
+
+;MoveBallUp
+   LDA   ballup
+   BEQ   MoveBallUpDone
+   
+   LDA   bally
+   SEC
+   SBC   ballspeedy
+   STA   bally
+   
+
+   LDA   bally
+   CMP   #TOPWALL
+   BCS   MoveBallUpDone  ;; if ball x > left wall, still on screen, skip
+   LDA   #$01
+   STA   balldown
+   LDA   #$00
+   STA   ballup
+MoveBallUpDone:
+
+; MoveBallDown
+   LDA   balldown
+   BEQ   MoveBallDownDone
+   
+   LDA   bally
+   CLC
+   ADC   ballspeedy
+   STA   bally
+
+   LDA   bally
+   CMP   #BOTTOMWALL
+   BCC   MoveBallDownDone  ;; if ball x > left wall, still on screen, skip
+   LDA   #$01
+   STA   ballup
+   LDA   #$00
+   STA   balldown
+MoveBallDownDone:
+
 
 updateball_end:   
    RTS
@@ -508,8 +602,8 @@ onPlayer:
 twoPlayers:
    .byt "2 Players",0
 palette:
-   .byt  $20,$10,$00,$0D,$20,$10,$00,$0D,$20,$10,$00,$0D,$20,$10,$00,$0D
-   .byt  $20,$10,$00,$0D,$20,$10,$00,$0D,$20,$10,$00,$0D,$20,$10,$00,$0D
+   .byt  $0F,$31,$32,$33,$34,$35,$36,$37,$38,$39,$3A,$3B,$3C,$3D,$3E,$0F
+   .byt  $0F,$1C,$15,$14,$31,$02,$38,$3C,$0F,$1C,$15,$14,$31,$02,$38,$3C
 
 sprites:
    .byt  $80,$02,$00,$80   ; ball?
