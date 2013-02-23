@@ -73,6 +73,7 @@
   <symbolinspector/>
   <breakpoints>
    <breakpoint target="0" itemtype="0" condition="0" item1absolute="139" enabled="0" event="0" datatype="0" type="0" data="0" item1="49291" item2="49291" conditiontype="0"/>
+   <breakpoint target="0" itemtype="0" condition="0" item1absolute="141" enabled="0" event="0" datatype="0" type="0" data="0" item1="49293" item2="49293" conditiontype="0"/>
   </breakpoints>
   <markers>
    <marker startaddr="0" endabsaddr="0" index="0" state="0" startabsaddr="0" endaddr="0"/>
@@ -113,6 +114,7 @@
   <sources>
    <source path="src/main.s" uuid="{85df0f74-f09f-439c-8488-3e00605a5140}" name="src/main.s"/>
    <source path="src/nes.h" uuid="{5da23e19-d3ce-4ed5-8923-41a2b561b40d}" name="src/nes.h"/>
+   <source path="src/oldcontroller.asm" uuid="{385c466e-f383-4271-b9d3-e3dd6a1e7b0a}" name="src/oldcontroller.asm"/>
   </sources>
   <binaryfiles>
    <binaryfile xsize="128" ysize="128" path="tilesets/gamegfx.png" uuid="{b2dc5fc9-a56d-4e66-97bf-6b3cc3668587}" name="tilesets/gamegfx.png"/>

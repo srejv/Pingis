@@ -11,6 +11,27 @@
 .p02
 
 .segment "ZEROPAGE"
+ballx: .res  1
+bally: .res  1
+ballup:  .res  1
+balldown:   .res  1
+ballleft:   .res  1
+ballright:  .res  1
+score1:   .res  1  ;score for player 1
+score2:   .res  1  ;score for player 2
+;  Ctrl data: |A|B|SELECT|START|UP|DOWN|LEFT|RIGHT
+buttons1: .res  1  ;controller data for player 1 
+buttons2: .res  1  ; controller data for player 2
+paddle1top:  .res  1  ; Paddle1Top
+paddle1mid:  .res  1  ; Paddle1Mid
+paddle1bot:  .res  1  ; Paddle1Bot
+paddle2top:  .res  1  ; Paddle2Top
+paddle2mid:  .res  1  ; Paddle2Mid
+paddle2bot:  .res  1  ;  Paddle2Bot
+nmi_count:   .res  1
+ballspeedx:  .res  1
+ballspeedy: .res  1
+playerspeed: .res 1  
 
 .segment "INESHDR"
   .byt "NES",$1A
@@ -30,42 +51,103 @@
 .endproc
 
 .proc nmi
-   LDA #$00
-   STA $2003       ; set the low byte (00) of the RAM address
-   LDA #$02
-   STA $4014       ; set the high byte (02) of the RAM address, start the transfer
 
-
-LatchController:
-   LDA #$01
-   STA $4016
-   LDA #$00
-   STA $4016       ; tell both the controllers to latch buttons
-
-
-ReadA: 
-   LDA $4016       ; player 1 - A
-   AND #%00000001  ; only look at bit 0
-   BEQ ReadADone   ; branch to ReadADone if button is NOT pressed (0)
-                  ; add instructions here to do something when button IS pressed (1)
-   LDA $0203       ; load sprite X position
-   CLC             ; make sure the carry flag is clear
-   ADC #$01        ; A = A + 1
-   STA $0203       ; save sprite X position
-ReadADone:        ; handling this button is done
-  
-
-ReadB: 
-   LDA $4016       ; player 1 - B
-   AND #%00000001  ; only look at bit 0
-   BEQ ReadBDone   ; branch to ReadBDone if button is NOT pressed (0)
-                  ; add instructions here to do something when button IS pressed (1)
-   LDA $0203       ; load sprite X position
-   SEC             ; make sure carry flag is set
-   SBC #$01        ; A = A - 1
-   STA $0203       ; save sprite X position
-ReadBDone:        ; handling this button is done
+   JSR   readControllers
+   JSR   drawSprites
+   
+   INC   nmi_count
    RTI
+.endproc
+
+.proc readControllers
+   LDA   #$01
+   STA   $4016
+   LDA   #$00
+   STA   $4016
+   LDX   #$08
+ReadController1Loop:
+   LDA   $4016
+   LSR   A           ; bit0 -> Carry
+   ROL   buttons1     ; bit0 <- Carry
+   DEX
+   BNE   ReadController1Loop
+   LDX   #$08
+ReadController2Loop:
+   LDA   $4017
+   LSR   A           ; bit0 -> Carry
+   ROL   buttons2     ; bit0 <- Carry
+   DEX
+   BNE   ReadController2Loop
+   RTS  
+.endproc
+
+.proc fillInitialData
+   ; set stuff to zero
+   LDA   #$00
+   STA   ballup
+   STA   ballleft
+   STA   score1
+   STA   score2
+   STA   buttons1
+   STA   buttons2
+   
+   LDA   #$04
+   STA   ballspeedx
+   STA   ballspeedy
+   STA   playerspeed
+   
+   
+   LDA   #$40
+   STA   bally
+   LDA   #$80
+   STA   ballx
+   
+   LDA   #$01
+   STA   balldown
+   STA   ballright
+   
+   ; load Paddle initial position (hopefully updated in main loop)
+   LDA   #$40  
+   STA   paddle1top 
+   STA   paddle2top    
+   LDA   #$48  
+   STA   paddle1mid
+   STA   paddle2mid
+   LDA   #$50
+   STA   paddle1bot
+   STA   paddle2bot
+
+   ;; osv
+   rts
+.endproc
+
+;;; Update sprite positions
+.proc drawSprites
+   LDA #$00
+   STA $2003  ; set the low byte (00) of the RAM address
+   LDA #$02
+   STA $4014  ; set the high byte (02) of the RAM address, start the transfer
+
+   LDA   bally
+   STA   $0200
+   LDA   ballx
+   STA   $0203
+      
+   LDA   paddle1top  ; load Paddle position (hopefully updated in main loop)
+   STA   $0204       ; save sprite Y position
+   LDA   paddle1mid  
+   STA   $0208
+   LDA   paddle1bot
+   STA   $020C
+   
+   LDA   paddle2top  ; load Paddle position (hopefully updated in main loop)
+   STA   $0210       ; set position Y
+   LDA   paddle2mid 
+   STA   $0214
+   LDA   paddle2bot 
+   STA   $0218
+   
+   RTS
 .endproc
 
 .proc reset
@@ -105,9 +187,10 @@ clear_zp:
   ; the most basic sound engine possible
   lda #$0F
   sta $4015
+  
+  JSR fillInitialData
   jsr initgraphics
-  jsr initinput
-  jsr initsound
+
   
   ; Wait for the PPU to warm up (part 2 of 2)
 vwait2:
@@ -116,8 +199,6 @@ vwait2:
 
   ; Draw HELLO WORLD text
   jsr drawHelloWorld
-  
-  JSR drawPaddles
 
   ; Turn screen on
   lda #0
@@ -129,9 +210,159 @@ vwait2:
   sta PPUMASK
 
 
-mainLoop:
+mainLoop:            ;;;;;;; MAIN LOOP
+
+   ;JSR   check_input
+   ;JSR   update_ball
+   JSR   wait_nmi
    
-   jmp mainLoop
+   jmp   mainLoop
+.endproc
+
+.proc update_ball
+   ; Move ball
+;MoveBallRight:
+   LDA   ballright
+   BEQ   MoveBallRightDone   ;;if ballright=0, skip this section
+
+   LDA ballx
+   CLC
+   ADC ballspeedx        ;;ballx position = ballx + ballspeedx
+   STA ballx
+
+   LDA ballx
+   CMP #RIGHTWALL
+   BCC MoveBallRightDone      ;;if ball x < right wall, still on screen, skip next section
+   LDA #$00
+   STA ballright
+   LDA #$01
+   STA ballleft         ;;bounce, ball now moving left
+   ;;in real game, give point to player 1, reset ball
+MoveBallRightDone:
+
+;MoveBallLeft:
+   LDA   ballleft
+   BEQ   MoveBallLeftDone
+   
+   LDA   ballx
+   SEC
+   SBC   ballspeedx
+   STA   ballx
+
+   LDA   ballx
+   CMP   #LEFTWALL
+   BCS   MoveBallLeftDone  ;; if ball x > left wall, still on screen, skip
+   LDA   #$01
+   STA   ballright
+   LDA   #$00
+   STA   ballleft
+   ; hit left wall, point for player 2
+MoveBallLeftDone:
+
+updateball_end:   
+   RTS
+.endproc
+
+.proc resetball
+   LDA   $80
+   STA   ballx
+   LDA   $40
+   STA   bally
+   rts
+.endproc
+
+.proc player1Scores
+   inc   score1
+   JSR   resetball
+   rts
+.endproc
+
+.proc player2Scores
+   INC   score2
+   JSR   resetball
+   RTS
+.endproc
+
+.proc check_input
+; Player 1 UP
+   LDA   buttons1
+   AND   #KEY_UP
+   BEQ   movePaddle1UpDone
+   
+   LDA   paddle1top
+   SEC
+   SBC   playerspeed
+   STA   paddle1top
+   LDA   paddle1mid
+   SEC
+   SBC   playerspeed
+   STA   paddle1mid
+   LDA   paddle1bot
+   SEC
+   SBC   playerspeed
+   STA   paddle1bot
+movePaddle1UpDone:
+; Player 1 DOWN
+   LDA   buttons1
+   AND   #KEY_DOWN
+   BEQ   movePaddle1DownDone
+   
+   LDA   paddle1top
+   CLC
+   ADC   playerspeed
+   STA   paddle1top
+   LDA   paddle1mid
+   CLC
+   ADC   playerspeed
+   STA   paddle1mid
+   LDA   paddle1bot
+   CLC
+   ADC   playerspeed
+   STA   paddle1bot
+movePaddle1DownDone:
+; Player 2 UP
+   LDA   buttons2
+   AND   #KEY_UP
+   BEQ   movePaddle2UpDone
+   
+   LDA   paddle2top
+   SEC
+   SBC   playerspeed
+   STA   paddle2top
+   LDA   paddle2mid
+   SEC
+   SBC   playerspeed
+   STA   paddle2mid
+   LDA   paddle2bot
+   SEC
+   SBC   playerspeed
+   STA   paddle2bot
+movePaddle2UpDone:
+; PLAYER 2 DOWN
+   LDA   buttons2
+   AND   #KEY_DOWN
+   BEQ   movePaddle2DownDone
+   
+   LDA   paddle2top
+   CLC
+   ADC   playerspeed
+   STA   paddle2top
+   LDA   paddle2mid
+   CLC
+   ADC   playerspeed
+   STA   paddle2mid
+   LDA   paddle2bot
+   CLC
+   ADC   playerspeed
+   STA   paddle2bot
+movePaddle2DownDone:
+.endproc
+
+.proc wait_nmi
+   LDA   nmi_count
+   loop: CMP nmi_count
+   BEQ   loop
+   RTS
 .endproc
 
 
@@ -145,10 +376,6 @@ LoadPalettes:
    LDX #$00              ; start out at 0
 LoadPalettesLoop:
    LDA palette, x        ; load data from address (palette + the value in x)
-                          ; 1st time through loop it will load palette+0
-                          ; 2nd time through loop it will load palette+1
-                          ; 3rd time through loop it will load palette+2
-                          ; etc
    STA $2007             ; write to PPU
    INX                   ; X = X + 1
    CPX #$20              ; Compare X to hex $10, decimal 16 - copying 16 bytes = 4 sprites
@@ -168,13 +395,6 @@ LoadSpritesLoop:
    rts
 .endproc
 
-.proc initinput
-   rts
-.endproc
-
-.proc initsound
-   rts
-.endproc
 
 .proc cls
   lda #VBLANK_NMI
@@ -199,11 +419,6 @@ LoadSpritesLoop:
   dex
   bne :-
   rts
-.endproc
-
-.proc drawPaddles
-
-   rts
 .endproc
 
 .proc drawHelloWorld
@@ -293,8 +508,8 @@ onPlayer:
 twoPlayers:
    .byt "2 Players",0
 palette:
-   .byt  $0F,$31,$32,$33,$34,$35,$36,$37,$38,$39,$3A,$3B,$3C,$3D,$3E,$0F
-   .byt  $0F,$1C,$15,$14,$31,$02,$38,$3C,$0F,$1C,$15,$14,$31,$02,$38,$3C
+   .byt  $20,$10,$00,$0D,$20,$10,$00,$0D,$20,$10,$00,$0D,$20,$10,$00,$0D
+   .byt  $20,$10,$00,$0D,$20,$10,$00,$0D,$20,$10,$00,$0D,$20,$10,$00,$0D
 
 sprites:
    .byt  $80,$02,$00,$80   ; ball?
