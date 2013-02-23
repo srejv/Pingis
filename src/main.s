@@ -197,8 +197,8 @@ vwait2:
   bit PPUSTATUS
   bpl vwait2
 
-  ; Draw HELLO WORLD text
-  jsr drawHelloWorld
+  ; prints some text on the screen. not
+  jsr drawText
 
   ; Turn screen on
   lda #0
@@ -421,7 +421,7 @@ LoadSpritesLoop:
   rts
 .endproc
 
-.proc drawHelloWorld
+.proc drawText
   jsr cls
 
   ; set monochrome palette
