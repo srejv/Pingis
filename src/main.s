@@ -20,8 +20,10 @@ ballup:  .res  1
 balldown:   .res  1
 ballleft:   .res  1
 ballright:  .res  1
-score1:   .res  1  ;score for player 1
-score2:   .res  1  ;score for player 2
+score1lo:   .res  1  ;score for player 1
+score1hi:   .res  1
+score2lo:   .res  1  ;score for player 2
+score2hi:   .res  1
 ;  Ctrl data: |A|B|SELECT|START|UP|DOWN|LEFT|RIGHT
 buttons1: .res  1  ;controller data for player 1 
 buttons2: .res  1  ; controller data for player 2
@@ -34,7 +36,8 @@ paddle2bot:  .res  1  ;  Paddle2Bot
 nmi_count:   .res  1
 ballspeedx:  .res  1
 ballspeedy: .res  1
-playerspeed: .res 1  
+playerspeed: .res 1
+gamestate:  .res  1
 
 
 
@@ -56,127 +59,12 @@ playerspeed: .res 1
    rti
 .endproc
 
+;;;;;;;;;;;;;;;;;;;;; NMI -
+.include "nmi.inc"
 
 
-.proc nmi
-   LDA #$00
-   STA $2003       ; set the low byte (00) of the RAM address
-   LDA #$02
-   STA $4014       ; set the high byte (02) of the RAM address, start the transfer
-
-   JSR   drawSprites
-   JSR   readControllers
-
-   INC   nmi_count
-   RTI
-.endproc
-
-
-
-.proc readControllers
-   LDA   #$01
-   STA   $4016
-   LDA   #$00
-   STA   $4016
-   LDX   #$08
-ReadController1Loop:
-   LDA   $4016
-   LSR   A           ; bit0 -> Carry
-   ROL   buttons1     ; bit0 <- Carry
-   DEX
-   BNE   ReadController1Loop
-   LDX   #$08
-
-ReadController2Loop:
-   LDA   $4017
-   LSR   A           ; bit0 -> Carry
-   ROL   buttons2     ; bit0 <- Carry
-   DEX
-   BNE   ReadController2Loop
-   RTS  
-.endproc
-
-
-
-.proc fillInitialData
-
-   ; set stuff to zero
-
-   LDA   #$00
-   STA   ballup
-   STA   ballleft
-   STA   score1
-   STA   score2
-   STA   buttons1
-   STA   buttons2
-
-   LDA   #$04
-   STA   ballspeedx
-   STA   ballspeedy
-   STA   playerspeed
-
-   LDA   #$40
-   STA   bally
-   LDA   #$DB
-   STA   ballx
-   
-   LDA   #$01
-   STA   balldown
-   STA   ballright
-   
-   ; load Paddle initial position (hopefully updated in main loop)
-
-   LDA   #$40  
-   STA   paddle1top
-   STA   paddle2top 
-   LDA   #$48
-   STA   paddle1mid
-   STA   paddle2mid
-   LDA   #$50
-   STA   paddle1bot
-   STA   paddle2bot
-   NOP
-   ;; osv
-   RTS
-.endproc
-
-
-
-;;; Update sprite positions
-
-.proc drawSprites
-
-   LDA   bally
-   STA   $0200
-   LDA   ballx
-   STA   $0203
-
-   LDA   paddle1top  ; load Paddle position (hopefully updated in main loop)
-   STA   $0204       ; save sprite Y position
-   LDA   paddle1mid  
-   STA   $0208
-   LDA   paddle1bot
-   STA   $020C
-   LDA   #PADDLE1X
-   STA   $0207
-   STA   $020B
-   STA   $020F
-
-   LDA   paddle2top  ; load Paddle position (hopefully updated in main loop)
-   STA   $0210       ; set position Y
-   LDA   paddle2mid 
-   STA   $0214
-   LDA   paddle2bot 
-   STA   $0218
-   LDA   #PADDLE2X
-   STA   $0213
-   STA   $0217
-   STA   $021B
-
-   RTS
-.endproc
-
-
+;;;;;;;;;;;;;;;;;;;;; INITIALIZATION
+.include "init.inc"
 
 .proc reset
    SEI
@@ -198,8 +86,6 @@ ReadController2Loop:
 vwait1:
    BIT PPUSTATUS
    BPL vwait1
-
-
 
    ; While waiting for the PPU to finish warming up, we have about
    ; 29000 cycles to burn without touching the PPU.
@@ -224,8 +110,10 @@ vwait2:
    JSR   initgraphics
 
   ; prints some text on the screen. not
-   JSR   drawText
-
+   JSR   cls   ; clear screen of text
+   JSR   setMonochromePalette
+   JSR   drawTitleScreen
+   
   ; Turn screen on
 
    LDA   #0
@@ -239,238 +127,125 @@ vwait2:
    STA   PPUMASK
 
 mainLoop:            ;;;;;;; MAIN LOOP
-   JSR   check_input
-   JSR   update_ball
-   JSR   wait_nmi
+   LDA   gamestate
+   CMP   #PLAYINGSCREEN
+   BEQ   mainPlayingState
+   CMP   #TITLESCREEN
+   BEQ   mainTitleState
+   CMP   #GAMEOVERSCREEN
+   BEQ   mainGameOverState
+   LDA   #TITLESCREEN
+   STA   gamestate
+   JMP   mainLoopEnd
 
+mainTitleState:
+   JSR   check_input_title
+   JMP   mainLoopEnd
+   
+mainGameOverState:
+   JSR   check_input_gameOver
+   JMP   mainLoopEnd
+   
+mainPlayingState:
+   JSR   check_input_game
+   JSR   update_ball
+   
+mainLoopEnd:
+   JSR   wait_nmi
    JMP   mainLoop
 .endproc
 
 
-
-.proc update_ball
-
-   ; Move ball
-
-;MoveBallRight:
-   LDA   ballright
-   BEQ   MoveBallRightDone   ;;if ballright=0, skip this section
-
-   LDA ballx
-   CLC
-   ADC ballspeedx        ;;ballx position = ballx + ballspeedx
-   STA ballx
-
-   LDA ballx
-   CMP #RIGHTWALL
-   BCC p2tryhit      ;;if ball x < right wall, still on screen, skip next section
-   LDA #$00
-   STA ballright
-   LDA #$01
-   STA ballleft         ;;bounce, ball now moving leftw
-   ;;in real game, give point to player 1, reset ball
-   JSR   player1Scores
-   JMP   MoveBallRightDone
-   
-p2tryhit:
-   ;if ballx is in exatcly the right position
-   LDA   ballx
-   CMP   #$E4
-   BNE   MoveBallRightDone
-   
-   ; Check if  paddle top - 4  < bally ((A) < (Mem))
-   ; if bally is greater than paddletop-4, continue
-   LDA   paddle2top
-   SEC
-   SBC   #$08
-   CMP   bally
-   BCS   MoveBallRightDone
-   ; maybe hit
-   CLC
-   ADC   #$08
-   CMP   bally
-   BCS   p2hittop
-   CLC
-   ADC   #$10
-   CMP   bally
-   BCS   p2hitmid
-   CLC
-   ADC   #$08
-   CMP   bally
-   BCS   p2hitbot
-   JMP   MoveBallRightDone
-   
-p2hittop:
-   LDA   #$01
-   STA   ballleft
-   STA   ballup
-   LDA   #$00
-   STA   ballright
-   STA   balldown
-   JMP   MoveBallRightDone
-p2hitmid:
-   LDA   #$01
-   STA   ballleft
-   LDA   #$00
-   STA   ballup
-   STA   balldown
-   STA   ballright
-   JMP   MoveBallRightDone
-p2hitbot:
-   LDA   #$01
-   STA   ballleft
-   STA   balldown
-   LDA   #$00
-   STA   ballright
-   STA   ballup
-  
-MoveBallRightDone:
-
-;MoveBallLeft:
-
-   LDA   ballleft
-   BEQ   MoveBallLeftDone
-
-   LDA   ballx
-   SEC
-   SBC   ballspeedx
-   STA   ballx
-
-   ; check against player 1
-   ; IF Y > paddle1bot
-   ; IF Y < paddle1top
-   ;  maybe hit
-   LDA   ballx
-   CMP   #LEFTWALL
-   BCS   p1tryhit  ;; if ball x > left wall, still on screen, skip
-   LDA   #$01
-   STA   ballright
-   LDA   #$00
-   STA   ballleft
-   ; hit left wall, point for player 2
-   JSR   player2Scores
-   JMP   MoveBallLeftDone
-   
-p1tryhit:
-   ;if ballx is in exatcly the right position
-   LDA   ballx
-   CMP   #$10
-   BNE   MoveBallLeftDone
-   
-   ; Check if  paddle top - 4  < bally ((A) < (Mem))
-   ; if bally is greater than paddletop-4, continue
-   LDA   paddle1top
-   SEC
-   SBC   #$04
-   CMP   bally
-   BCS   MoveBallLeftDone
-   ; maybe hit
-   CLC
-   ADC   #$08
-   CMP   bally
-   BCS   p1hittop
-   CLC
-   ADC   #$10
-   CMP   bally
-   BCS   p1hitmid
-   CLC
-   ADC   #$08
-   CMP   bally
-   BCS   p1hitbot
-   JMP   MoveBallLeftDone
-   
-p1hittop:
-   LDA   #$01
-   STA   ballright
-   STA   ballup
-   LDA   #$00
-   STA   ballleft
-   STA   balldown
-   JMP   MoveBallLeftDone
-p1hitmid:
-   LDA   #$01
-   STA   ballright
-   LDA   #$00
-   STA   ballup
-   STA   balldown
-   STA   ballleft
-   JMP   MoveBallLeftDone
-p1hitbot:
-   LDA   #$01
-   STA   ballright
-   STA   balldown
-   LDA   #$00
-   STA   ballleft
-   STA   ballup
-
-MoveBallLeftDone:
-
-;MoveBallUp
-   LDA   ballup
-   BEQ   MoveBallUpDone
-   
-   LDA   bally
-   SEC
-   SBC   ballspeedy
-   STA   bally
-
-   LDA   bally
-   CMP   #TOPWALL
-   BCS   MoveBallUpDone  ;; if ball x > left wall, still on screen, skip
-   LDA   #$01
-   STA   balldown
-   LDA   #$00
-   STA   ballup
-MoveBallUpDone:
-
-; MoveBallDown
-   LDA   balldown
-   BEQ   MoveBallDownDone
-   
-   LDA   bally
-   CLC
-   ADC   ballspeedy
-   STA   bally
-
-   LDA   bally
-   CMP   #BOTTOMWALL
-   BCC   MoveBallDownDone  ;; if ball x > left wall, still on screen, skip
-   LDA   #$01
-   STA   ballup
-   LDA   #$00
-   STA   balldown
-MoveBallDownDone:
-updateball_end:   
+.proc check_input_title
+   LDA   buttons1 ; some error? :S
+   AND   #KEY_START
+   BNE   yeah
+   LDA   buttons2
+   AND   #KEY_START
+   BEQ   nope
+yeah:
+   LDA   #PLAYINGSCREEN
+   STA   gamestate
+   JSR   drawGameScreen
+nope:
    RTS
 .endproc
 
-.proc resetball
-
-   LDA   #$80
-   STA   ballx
-   STA   bally
+.proc check_input_gameOver
+   LDA   buttons1 ; some error? :S
+   AND   #KEY_START
+   BNE   yeaha
+   LDA   buttons2
+   AND   #KEY_START
+   BEQ   nopea
+yeaha:
+   LDA   #TITLESCREEN
+   STA   gamestate
+nopea:
    RTS
 .endproc
+
+.include "ball.inc"
 
 .proc player1Scores
 
-   INC   score1
+   LDA   #$0A
+   INC   score1lo
+   CMP   score1lo
+   BNE   player1ScoresDone
+   LDA   #$00
+   STA   score1lo
+   INC   score1hi
+player1ScoresDone:
+
+   ; check win
+   LDA   score1hi
+   CMP   #$01
+   BNE   p1resball
+   LDA   score1lo
+   CMP   #$05
+   BNE   p1resball
+   JSR   drawPlayer1won
+   JSR   drawGameOver
+   LDA   #GAMEOVERSCREEN
+   STA   gamestate
+   
+p1resball:
    JSR   resetball
    RTS
 .endproc
-
 
 
 .proc player2Scores
 
-   INC   score2
+   LDA   #$0A
+   INC   score2lo
+   CMP   score2lo
+   BNE   player2ScoresDone
+   LDA   #$00
+   STA   score2lo
+   INC   score2hi
+player2ScoresDone:
+
+   ; check win
+   LDA   score2hi
+   CMP   #$01
+   BNE   p2resball
+   LDA   score2lo
+   CMP   #$05
+   BNE   p2resball
+   JSR   drawPlayer1won
+   JSR   drawGameOver
+   LDA   #GAMEOVERSCREEN
+   STA   gamestate
+   
+p2resball:
    JSR   resetball
    RTS
 .endproc
 
 
-
-.proc check_input
+.proc check_input_game
 ; Player 1 UP
    LDA   buttons1 ; some error? :S
    AND   #KEY_UP
@@ -568,110 +343,220 @@ movePaddle2UpDone:
    ADC   #$08
    STA   paddle2bot
 movePaddle2DownDone:
-.endproc
 
-.proc wait_nmi
-
-   LDA   nmi_count
-   loop: CMP nmi_count
-   BEQ   loop
-   RTS
-   
-.endproc
-
-.proc initgraphics
-
-LoadPalettes:
-   LDA $2002             ; read PPU status to reset the high/low latch
-   LDA #$3F
-   STA $2006             ; write the high byte of $3F00 address
-   LDA #$00
-   STA $2006             ; write the low byte of $3F00 address
-   LDX #$00              ; start out at 0
-LoadPalettesLoop:
-   LDA palette, x        ; load data from address (palette + the value in x)
-   STA $2007             ; write to PPU
-   INX                   ; X = X + 1
-   CPX #$20              ; Compare X to hex $10, decimal 16 - copying 16 bytes = 4 sprites
-   BNE LoadPalettesLoop  ; Branch to LoadPalettesLoop if compare was Not Equal to zero
-                        ; if compare was equal to 32, keep going down
-LoadSprites:
-   LDX #$00              ; start at 0
-LoadSpritesLoop:
-   LDA sprites, x        ; load data from address (sprites +  x)
-   STA $0200, x          ; store into RAM address ($0200 + x)
-   INX                   ; X = X + 1
-   CPX #$20              ; Compare X to hex $20, decimal 32
-   BNE LoadSpritesLoop   ; Branch to LoadSpritesLoop if compare was Not Equal to zero
-                        ; if compare was equal to 32, keep going down
    RTS
 .endproc
 
 .proc cls
-  LDA #VBLANK_NMI
-  STA PPUCTRL
-  LDA #$20
-  LDX #$00
-  STA PPUMASK
-  STA PPUADDR
-  STA PPUADDR
-  LDX #240
+   LDA   #VBLANK_NMI
+   STA   PPUCTRL
+   LDA   #$20
+   LDX   #$00
+   STA   PPUMASK
+   STA   PPUADDR
+   STA   PPUADDR
+   LDX   #240
 :
-  STA PPUDATA
-  STA PPUDATA
-  STA PPUDATA
-  STA PPUDATA
-  DEX
-  BNE :-
-  LDX #64
-  LDA #0
+   STA PPUDATA
+   STA PPUDATA
+   STA PPUDATA
+   STA PPUDATA
+   DEX
+   BNE :-
+   LDX #64
+   LDA #0
 :
-  STA PPUDATA
-  DEX
-  BNE :-
-  RTS
+   STA PPUDATA
+   DEX
+   BNE :-
+   RTS
 .endproc
 
-.proc drawText
-  JSR cls
-  ; set monochrome palette
-  LDA #$3F
-  STA PPUADDR
-  LDA #$00
-  STA PPUADDR
-  LDX #8
+
+.proc setMonochromePalette
+   ;  set monochrome palette
+   LDA   #$3F
+   STA   PPUADDR
+   LDA   #$00
+   STA   PPUADDR
+   LDX   #8
 :
-  LDA #$17
-  STA PPUDATA
-  lda #$38
-  STA PPUDATA
-  STA PPUDATA
-  STA PPUDATA
-  DEX
-  BNE :-
-  
-  ; load source and dest for press start
-  LDA #>pressStart
-  STA 1
-  LDA #<pressStart
-  STA 0
-  LDA #$22
-  STA 3
-  LDA #$6A
-  STA 2
-  JSR printMsg
+   LDA   #$17
+   STA   PPUDATA
+   lda   #$38
+   STA   PPUDATA
+   STA   PPUDATA
+   STA   PPUDATA
+   DEX   
+   BNE   :-
+   RTS
+.endproc
+
+.proc clear
+   LDA   #>clearAscii
+   STA   1
+   LDA   #<clearAscii
+   STA   0
+   LDA   #$20
+   STA   3
+   LDA   #$6C
+   STA   2
+   JSR   printMsg
+      ; Credits
+   LDA   #>clearAscii
+   STA   1
+   LDA   #<clearAscii
+   STA   0
+   LDA   #$20
+   STA   3
+   LDA   #$E8
+   STA   2
+   JSR   printMsg
+   
+   ; Press Start
+   LDA   #>clearAscii
+   STA   1
+   LDA   #<clearAscii
+   LDA   0
+   LDA   #$22
+   STA   3
+   LDA   #$08
+   JSR   printMsg
+   
+   ; Game over
+   LDA   #>clearAscii
+   STA   1
+   LDA   #<clearAscii
+   STA   0
+   LDA   #$22
+   STA   3
+   LDA   #$0C
+   STA   2
+   JSR   printMsg
+
+   ; Player 2 won
+   LDA   #>clearAscii
+   STA   1
+   LDA   #<clearAscii
+   STA   0
+   LDA   #$20
+   STA   3
+   LDA   #$EA
+   STA   2
+   JSR   printMsg
+   RTS
+.endproc
+.proc drawGameOver
+   ; Game Over
+   LDA   #>gameOverAscii
+   STA   1
+   LDA   #<gameOverAscii
+   STA   0
+   LDA   #$22
+   STA   3
+   LDA   #$0C
+   STA   2
+   JSR   printMsg
+   RTS
+.endproc
+.proc drawPlayer1won
+   ; Player 1 won
+   LDA   #>player1winAscii
+   STA   1
+   LDA   #<player1winAscii
+   STA   0
+   LDA   #$20
+   STA   3
+   LDA   #$EA
+   STA   2
+   JSR   printMsg
+   RTS
+.endproc
+.proc drawPlayer2won
+   ; Player 2 won
+   LDA   #>player2winAscii
+   STA   1
+   LDA   #<player2winAscii
+   STA   0
+   LDA   #$20
+   STA   3
+   LDA   #$EA
+   STA   2
+   JSR   printMsg
+   RTS
+.endproc
+
+.proc drawTitleScreen
+   JSR clear
+   
+   ; Pingis
+   LDA   #>titleAscii
+   STA   1
+   LDA   #<titleAscii
+   STA   0
+   LDA   #$20
+   STA   3
+   LDA   #$6C
+   STA   2
+   JSR   printMsg
+   
+   ; Credits
+   LDA   #>creditsAscii
+   STA   1
+   LDA   #<creditsAscii
+   STA   0
+   LDA   #$20
+   STA   3
+   LDA   #$E8
+   STA   2
+   JSR   printMsg
+   
+   ; Press Start
+   LDA   #>pressStartAscii
+   STA   1
+   LDA   #<pressStartAscii
+   LDA   0
+   LDA   #$22
+   STA   3
+   LDA   #$08
+   JSR   printMsg
+   
+   RTS
+.endproc
+
+.proc drawGameScreen
+   JSR clear
+
+   RTS
+.endproc
+
+;.proc drawText
+;   JSR cls
+   ; set monochrome palette
+ ;  JSR setMonochromePalette;
+ ; 
+   ; load source and dest for press start
+;   LDA #>pressStart
+;   STA 1
+;   LDA #<pressStart
+;   STA 0
+;   LDA #$22    ; startminnesaddress hög ( från där man börjar rita)
+;   STA 3
+;   LDA #$6A    ; startminnesaddress låg ( från där man börjar rita)
+;   STA 2
+;   JSR printMsg
 
   ; load source and destination addresses
-  LDA #>helloWorld
-  STA 1
-  LDA #<helloWorld
-  STA 0
-  LDA #$20     ; startminnesaddress hög
-  STA 3
-  LDA #$62     ; startminnesaddress låg
-  STA 2
-  ; fall through
-.endproc
+;  LDA #>helloWorld
+;  STA 1
+;  LDA #<helloWorld
+;;  STA 0
+;  LDA #$20     ; startminnesaddress hög
+;  STA 3
+;  LDA #$62     ; startminnesaddress låg
+;  STA 2
+;  ; fall through
+;.endproc
 
 .proc printMsg
 dstLo = 2
@@ -709,15 +594,18 @@ done:
   RTS
 .endproc
 
+
 .segment "RODATA"
-helloWorld:
-  .byt "pingis! HURRA!",0
-pressStart:
-   .byt "Press Start",0
-onPlayer:
-   .byt "1 Player",0
-twoPlayers:
-   .byt "2 Players",0
+titleAscii:       .byt "Pingis!!",0
+creditsAscii:     .byt "By: Oscar Dragen",0
+pressStartAscii:  .byt "Press Start",0
+onPlayer:         .byt "1 Player",0
+twoPlayers:       .byt "2 Players",0
+player1winAscii:  .byt "PLAYER 1 WINS!",0
+player2winAscii:  .byt "PLAYER 2 WINS!",0
+gameOverAscii:    .byt "GAME OVER",0
+clearAscii:       .byt "                ",0
+
 palette:
    .byt  $0F,$31,$32,$33,$34,$35,$36,$37,$38,$39,$3A,$3B,$3C,$3D,$3E,$0F
    .byt  $0F,$1C,$15,$14,$31,$02,$38,$3C,$0F,$1C,$15,$14,$31,$02,$38,$3C
@@ -728,9 +616,9 @@ sprites:
    .byt  $38,$05,$00,$10   ; paddle1 mid
    .byt  $40,$03,$00,$10   ; paddle1 bot
    .byt  $80,$04,$00,$E0   ; paddle2 top
-   .byt  $88,$05,$00,$E0
+   .byt  $88,$05,$00,$E0   ; paddle2 mid
    .byt  $90,$03,$00,$E0   ; paddle2 bot
-   .byt  $F0,$02,$00,$88   ; paddle2 bot
-   .byt  $F0,$02,$00,$88   ; paddle2 bot
-   .byt  $F0,$02,$00,$88   ; paddle2 bot
+   .byt  $F0,$02,$00,$88   ; misc
+   .byt  $F0,$02,$00,$88   ; misc
+   .byt  $F0,$02,$00,$88   ; misc
 
