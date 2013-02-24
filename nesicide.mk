@@ -80,7 +80,7 @@ PROGRAM = $(PRGDIR)/hello_world.prg
 
 # Set SOURCES to something like 'src/foo.c src/bar.s'.
 SOURCES := 
-SOURCES += src/main.s src/oldcontroller.asm
+SOURCES += src/main.s
 
 # Get rid of Windows path wonkiness.
 SOURCES := $(subst \,/,$(SOURCES))

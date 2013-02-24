@@ -1,5 +1,5 @@
 ;
-; Russian Roulette game for NES
+; Based on Russian Roulette game for NES
 ; Copyright 2010 Damian Yerrick
 ;
 ; Copying and distribution of this file, with or without
@@ -7,6 +7,9 @@
 ; provided the copyright notice and this notice are preserved.
 ; This file is offered as-is, without any warranty.
 ;
+; Modifications by Oscar Dragén 
+;
+
 .include "nes.h"
 .p02
 
@@ -33,6 +36,8 @@ ballspeedx:  .res  1
 ballspeedy: .res  1
 playerspeed: .res 1  
 
+
+
 .segment "INESHDR"
   .byt "NES",$1A
   .byt 1  ; 16 KiB PRG ROM
@@ -46,22 +51,27 @@ playerspeed: .res 1
 .segment "CODE"
 
 ; we don't use irqs yet
+
 .proc irq
    rti
 .endproc
+
+
 
 .proc nmi
    LDA #$00
    STA $2003       ; set the low byte (00) of the RAM address
    LDA #$02
    STA $4014       ; set the high byte (02) of the RAM address, start the transfer
-   
+
    JSR   drawSprites
    JSR   readControllers
-   
+
    INC   nmi_count
    RTI
 .endproc
+
+
 
 .proc readControllers
    LDA   #$01
@@ -76,6 +86,7 @@ ReadController1Loop:
    DEX
    BNE   ReadController1Loop
    LDX   #$08
+
 ReadController2Loop:
    LDA   $4017
    LSR   A           ; bit0 -> Carry
@@ -85,8 +96,12 @@ ReadController2Loop:
    RTS  
 .endproc
 
+
+
 .proc fillInitialData
+
    ; set stuff to zero
+
    LDA   #$00
    STA   ballup
    STA   ballleft
@@ -94,15 +109,15 @@ ReadController2Loop:
    STA   score2
    STA   buttons1
    STA   buttons2
-   
+
    LDA   #$04
    STA   ballspeedx
    STA   ballspeedy
    STA   playerspeed
-   
+
    LDA   #$40
    STA   bally
-   LDA   #$80
+   LDA   #$DB
    STA   ballx
    
    LDA   #$01
@@ -110,10 +125,11 @@ ReadController2Loop:
    STA   ballright
    
    ; load Paddle initial position (hopefully updated in main loop)
+
    LDA   #$40  
-   STA   paddle1top 
-   STA   paddle2top    
-   LDA   #$48  
+   STA   paddle1top
+   STA   paddle2top 
+   LDA   #$48
    STA   paddle1mid
    STA   paddle2mid
    LDA   #$50
@@ -124,100 +140,118 @@ ReadController2Loop:
    RTS
 .endproc
 
+
+
 ;;; Update sprite positions
+
 .proc drawSprites
+
    LDA   bally
    STA   $0200
    LDA   ballx
    STA   $0203
-      
+
    LDA   paddle1top  ; load Paddle position (hopefully updated in main loop)
    STA   $0204       ; save sprite Y position
    LDA   paddle1mid  
    STA   $0208
    LDA   paddle1bot
    STA   $020C
-   
+   LDA   #PADDLE1X
+   STA   $0207
+   STA   $020B
+   STA   $020F
+
    LDA   paddle2top  ; load Paddle position (hopefully updated in main loop)
    STA   $0210       ; set position Y
    LDA   paddle2mid 
    STA   $0214
    LDA   paddle2bot 
    STA   $0218
-   
+   LDA   #PADDLE2X
+   STA   $0213
+   STA   $0217
+   STA   $021B
+
    RTS
 .endproc
 
+
+
 .proc reset
-  sei
-
+   SEI
+  
   ; Acknowledge and disable interrupt sources during bootup
-  ldx #0
-  stx PPUCTRL    ; disable vblank NMI
-  stx PPUMASK    ; disable rendering (and rendering-triggered mapper IRQ)
-  lda #$40
-  sta $4017      ; disable frame IRQ
-  stx $4010      ; disable DPCM IRQ
-  bit PPUSTATUS  ; ack vblank NMI
-  bit $4015      ; ack DPCM IRQ
-  cld            ; disable decimal mode to help generic 6502 debuggers
-                 ; http://magweasel.com/2009/08/29/hidden-messagin/
-  dex            ; set up the stack
-  txs
-
+   LDX   #0
+   STX   PPUCTRL    ; disable vblank NMI
+   STX   PPUMASK    ; disable rendering (and rendering-triggered mapper IRQ
+   LDA   #$40
+   STA   $4017      ; disable frame IRQ
+   STX   $4010      ; disable DPCM IRQ
+   BIT   PPUSTATUS  ; ack vblank NMI
+   BIT   $4015      ; ack DPCM IRQ
+   CLD            ; disable decimal mode to help generic 6502 debuggers
+   DEX            ; set up the stack
+   TXS
+  
   ; Wait for the PPU to warm up (part 1 of 2)
 vwait1:
-  bit PPUSTATUS
-  bpl vwait1
+   BIT PPUSTATUS
+   BPL vwait1
 
-  ; While waiting for the PPU to finish warming up, we have about
-  ; 29000 cycles to burn without touching the PPU.  So we have time
-  ; to initialize some of RAM to known values.
-  ; Ordinarily the "new game" initializes everything that the game
-  ; itself needs, so we'll just do zero page and shadow OAM.
-  ldy #$00
-  lda #$F0
-  ldx #$00
+
+
+   ; While waiting for the PPU to finish warming up, we have about
+   ; 29000 cycles to burn without touching the PPU.
+   LDY #$00
+   LDA #$F0
+   LDX #$00
 clear_zp:
-  sty $00,x
-  inx
-  bne clear_zp
-  ; the most basic sound engine possible
-  lda #$0F
-  sta $4015
- 
-  ; Wait for the PPU to warm up (part 2 of 2)
-vwait2:
-  bit PPUSTATUS
-  bpl vwait2
+   STY $00,x
+   INX
+   BNE   clear_zp
 
-  JSR fillInitialData
-  JSR initgraphics
-  
+  ; the most basic sound engine possible
+   LDA   #$0F
+   STA   $4015
+   ; Wait for the PPU to warm up (part 2 of 2)
+
+vwait2:
+   BIT   PPUSTATUS
+   BPL   vwait2
+
+   JSR   fillInitialData
+   JSR   initgraphics
+
   ; prints some text on the screen. not
-  jsr drawText
+   JSR   drawText
 
   ; Turn screen on
-  lda #0
-  sta PPUSCROLL
-  sta PPUSCROLL
-  lda #VBLANK_NMI|BG_1000|OBJ_1000
-  sta PPUCTRL
-  lda #BG_ON|OBJ_ON
-  sta PPUMASK
 
+   LDA   #0
+   STA   PPUSCROLL
+   STA   PPUSCROLL
+
+   LDA   #VBLANK_NMI|BG_1000|OBJ_1000
+   STA   PPUCTRL
+
+   LDA   #BG_ON|OBJ_ON
+   STA   PPUMASK
 
 mainLoop:            ;;;;;;; MAIN LOOP
-
    JSR   check_input
    JSR   update_ball
    JSR   wait_nmi
-   
-   jmp   mainLoop
+
+   JMP   mainLoop
 .endproc
 
+
+
 .proc update_ball
+
    ; Move ball
+
 ;MoveBallRight:
    LDA   ballright
    BEQ   MoveBallRightDone   ;;if ballright=0, skip this section
@@ -227,92 +261,148 @@ mainLoop:            ;;;;;;; MAIN LOOP
    ADC ballspeedx        ;;ballx position = ballx + ballspeedx
    STA ballx
 
-   
    LDA ballx
    CMP #RIGHTWALL
-   BCC p2trythit      ;;if ball x < right wall, still on screen, skip next section
+   BCC p2tryhit      ;;if ball x < right wall, still on screen, skip next section
    LDA #$00
    STA ballright
    LDA #$01
-   STA ballleft         ;;bounce, ball now moving left
+   STA ballleft         ;;bounce, ball now moving leftw
    ;;in real game, give point to player 1, reset ball
+   JSR   player1Scores
    JMP   MoveBallRightDone
    
-   ; check against player 2
-   ; IF Y > paddle1bot
-   ; IF Y < paddle1top
-   ;  maybe hit
-p2trythit:
-   LDA   paddle2bot
+p2tryhit:
+   ;if ballx is in exatcly the right position
+   LDA   ballx
+   CMP   #$E4
+   BNE   MoveBallRightDone
+   
+   ; Check if  paddle top - 4  < bally ((A) < (Mem))
+   ; if bally is greater than paddletop-4, continue
+   LDA   paddle2top
+   SEC
+   SBC   #$08
+   CMP   bally
+   BCS   MoveBallRightDone
+   ; maybe hit
    CLC
    ADC   #$08
    CMP   bally
-   BCC   p2nohit
-   LDA   paddle2top
+   BCS   p2hittop
+   CLC
+   ADC   #$10
    CMP   bally
-   BEQ   p2maybehit
-   BCS   p2nohit
-p2maybehit:
-   LDA   #PADDLE2X
-   CMP   ballx
-   BCC   p2nohit
+   BCS   p2hitmid
+   CLC
+   ADC   #$08
+   CMP   bally
+   BCS   p2hitbot
+   JMP   MoveBallRightDone
+   
+p2hittop:
+   LDA   #$01
+   STA   ballleft
+   STA   ballup
+   LDA   #$00
+   STA   ballright
+   STA   balldown
+   JMP   MoveBallRightDone
+p2hitmid:
    LDA   #$01
    STA   ballleft
    LDA   #$00
+   STA   ballup
+   STA   balldown
    STA   ballright
-p2nohit:
+   JMP   MoveBallRightDone
+p2hitbot:
+   LDA   #$01
+   STA   ballleft
+   STA   balldown
+   LDA   #$00
+   STA   ballright
+   STA   ballup
   
 MoveBallRightDone:
-      
+
 ;MoveBallLeft:
+
    LDA   ballleft
    BEQ   MoveBallLeftDone
-   
+
    LDA   ballx
    SEC
    SBC   ballspeedx
    STA   ballx
-   
+
    ; check against player 1
    ; IF Y > paddle1bot
    ; IF Y < paddle1top
    ;  maybe hit
-
    LDA   ballx
    CMP   #LEFTWALL
-   BCS   p1trythit  ;; if ball x > left wall, still on screen, skip
+   BCS   p1tryhit  ;; if ball x > left wall, still on screen, skip
    LDA   #$01
    STA   ballright
    LDA   #$00
    STA   ballleft
    ; hit left wall, point for player 2
+   JSR   player2Scores
    JMP   MoveBallLeftDone
    
-   ; check against player 1
-   ; IF Y > paddle1bot
-   ; IF Y < paddle1top
-   ;  maybe hit
-p1trythit:
-   LDA   paddle1bot
+p1tryhit:
+   ;if ballx is in exatcly the right position
+   LDA   ballx
+   CMP   #$10
+   BNE   MoveBallLeftDone
+   
+   ; Check if  paddle top - 4  < bally ((A) < (Mem))
+   ; if bally is greater than paddletop-4, continue
+   LDA   paddle1top
+   SEC
+   SBC   #$04
+   CMP   bally
+   BCS   MoveBallLeftDone
+   ; maybe hit
    CLC
    ADC   #$08
    CMP   bally
-   BCC   p1nohit
-   LDA   paddle1top
+   BCS   p1hittop
+   CLC
+   ADC   #$10
    CMP   bally
-   BEQ   p1maybehit
-   BCS   p1nohit
-p1maybehit:
-   LDA   #PADDLE1X
-   CMP   ballx
-   BEQ   p1hit
-   BCS   p1nohit
-p1hit:
+   BCS   p1hitmid
+   CLC
+   ADC   #$08
+   CMP   bally
+   BCS   p1hitbot
+   JMP   MoveBallLeftDone
+   
+p1hittop:
+   LDA   #$01
+   STA   ballright
+   STA   ballup
+   LDA   #$00
+   STA   ballleft
+   STA   balldown
+   JMP   MoveBallLeftDone
+p1hitmid:
    LDA   #$01
    STA   ballright
    LDA   #$00
+   STA   ballup
+   STA   balldown
    STA   ballleft
-p1nohit:
+   JMP   MoveBallLeftDone
+p1hitbot:
+   LDA   #$01
+   STA   ballright
+   STA   balldown
+   LDA   #$00
+   STA   ballleft
+   STA   ballup
+
 MoveBallLeftDone:
 
 ;MoveBallUp
@@ -323,7 +413,6 @@ MoveBallLeftDone:
    SEC
    SBC   ballspeedy
    STA   bally
-   
 
    LDA   bally
    CMP   #TOPWALL
@@ -351,37 +440,45 @@ MoveBallUpDone:
    LDA   #$00
    STA   balldown
 MoveBallDownDone:
-
-
 updateball_end:   
    RTS
 .endproc
 
 .proc resetball
-   LDA   $80
+
+   LDA   #$80
    STA   ballx
-   LDA   $40
    STA   bally
-   rts
+   RTS
 .endproc
 
 .proc player1Scores
-   inc   score1
+
+   INC   score1
    JSR   resetball
-   rts
+   RTS
 .endproc
 
+
+
 .proc player2Scores
+
    INC   score2
    JSR   resetball
    RTS
 .endproc
 
+
+
 .proc check_input
 ; Player 1 UP
-   LDA   buttons1
+   LDA   buttons1 ; some error? :S
    AND   #KEY_UP
    BEQ   movePaddle1UpDone
+
+   LDA   paddle1top
+   CMP   #TOPWALL
+   BCC   movePaddle1UpDone
    
    LDA   paddle1top
    SEC
@@ -395,11 +492,20 @@ updateball_end:
    SEC
    SBC   playerspeed
    STA   paddle1bot
+
 movePaddle1UpDone:
+
 ; Player 1 DOWN
    LDA   buttons1
    AND   #KEY_DOWN
+   CMP   #$00
    BEQ   movePaddle1DownDone
+
+   LDA   paddle1bot
+   CLC
+   ADC   #$08
+   CMP   #BOTTOMWALL
+   BCS   movePaddle1DownDone
    
    LDA   paddle1top
    CLC
@@ -414,12 +520,17 @@ movePaddle1UpDone:
    ADC   playerspeed
    STA   paddle1bot
 movePaddle1DownDone:
+
 ; Player 2 UP
    LDA   buttons2
    AND   #KEY_UP
    BEQ   movePaddle2UpDone
    
    LDA   paddle2top
+   CMP   #TOPWALL
+   BCC   movePaddle2UpDone
+   
+   LDA   paddle2top
    SEC
    SBC   playerspeed
    STA   paddle2top
@@ -431,36 +542,45 @@ movePaddle1DownDone:
    SEC
    SBC   playerspeed
    STA   paddle2bot
+
 movePaddle2UpDone:
+
 ; PLAYER 2 DOWN
+
    LDA   buttons2
    AND   #KEY_DOWN
    BEQ   movePaddle2DownDone
    
+   LDA   paddle2bot
+   CLC
+   ADC   #$08
+   CMP   #BOTTOMWALL
+   BCS   movePaddle2DownDone
+  
    LDA   paddle2top
    CLC
    ADC   playerspeed
    STA   paddle2top
-   LDA   paddle2mid
    CLC
-   ADC   playerspeed
+   ADC   #$08
    STA   paddle2mid
-   LDA   paddle2bot
    CLC
-   ADC   playerspeed
+   ADC   #$08
    STA   paddle2bot
 movePaddle2DownDone:
 .endproc
 
 .proc wait_nmi
+
    LDA   nmi_count
    loop: CMP nmi_count
    BEQ   loop
    RTS
+   
 .endproc
 
-
 .proc initgraphics
+
 LoadPalettes:
    LDA $2002             ; read PPU status to reset the high/low latch
    LDA #$3F
@@ -475,8 +595,6 @@ LoadPalettesLoop:
    CPX #$20              ; Compare X to hex $10, decimal 16 - copying 16 bytes = 4 sprites
    BNE LoadPalettesLoop  ; Branch to LoadPalettesLoop if compare was Not Equal to zero
                         ; if compare was equal to 32, keep going down
-
-
 LoadSprites:
    LDX #$00              ; start at 0
 LoadSpritesLoop:
@@ -486,110 +604,109 @@ LoadSpritesLoop:
    CPX #$20              ; Compare X to hex $20, decimal 32
    BNE LoadSpritesLoop   ; Branch to LoadSpritesLoop if compare was Not Equal to zero
                         ; if compare was equal to 32, keep going down
-   rts
+   RTS
 .endproc
 
-
 .proc cls
-  lda #VBLANK_NMI
-  sta PPUCTRL
-  lda #$20
-  ldx #$00
-  stx PPUMASK
-  sta PPUADDR
-  stx PPUADDR
-  ldx #240
+  LDA #VBLANK_NMI
+  STA PPUCTRL
+  LDA #$20
+  LDX #$00
+  STA PPUMASK
+  STA PPUADDR
+  STA PPUADDR
+  LDX #240
 :
-  sta PPUDATA
-  sta PPUDATA
-  sta PPUDATA
-  sta PPUDATA
-  dex
-  bne :-
-  ldx #64
-  lda #0
+  STA PPUDATA
+  STA PPUDATA
+  STA PPUDATA
+  STA PPUDATA
+  DEX
+  BNE :-
+  LDX #64
+  LDA #0
 :
-  sta PPUDATA
-  dex
-  bne :-
-  rts
+  STA PPUDATA
+  DEX
+  BNE :-
+  RTS
 .endproc
 
 .proc drawText
-  jsr cls
-
+  JSR cls
   ; set monochrome palette
-  lda #$3F
-  sta PPUADDR
-  lda #$00
-  sta PPUADDR
-  ldx #8
+  LDA #$3F
+  STA PPUADDR
+  LDA #$00
+  STA PPUADDR
+  LDX #8
 :
-  lda #$17
-  sta PPUDATA
+  LDA #$17
+  STA PPUDATA
   lda #$38
-  sta PPUDATA
-  sta PPUDATA
-  sta PPUDATA
-  dex
-  bne :-
+  STA PPUDATA
+  STA PPUDATA
+  STA PPUDATA
+  DEX
+  BNE :-
   
   ; load source and dest for press start
-  lda #>pressStart
-  sta 1
-  lda #<pressStart
-  sta 0
-  lda #$22
-  sta 3
-  lda #$6A
-  sta 2
+  LDA #>pressStart
+  STA 1
+  LDA #<pressStart
+  STA 0
+  LDA #$22
+  STA 3
+  LDA #$6A
+  STA 2
   JSR printMsg
 
   ; load source and destination addresses
-  lda #>helloWorld
-  sta 1
-  lda #<helloWorld
-  sta 0
-  lda #$20     ; startminnesaddress hög
-  sta 3
-  lda #$62     ; startminnesaddress låg
-  sta 2
+  LDA #>helloWorld
+  STA 1
+  LDA #<helloWorld
+  STA 0
+  LDA #$20     ; startminnesaddress hög
+  STA 3
+  LDA #$62     ; startminnesaddress låg
+  STA 2
   ; fall through
 .endproc
+
 .proc printMsg
 dstLo = 2
 dstHi = 3
 src = 0
-  lda dstHi
-  sta PPUADDR
-  lda dstLo
-  sta PPUADDR
-  ldy #0
+  LDA dstHi
+  STA PPUADDR
+  LDA dstLo
+  STA PPUADDR
+  LDY #0
 loop:
-  lda (src),y
-  beq done
-  iny
-  bne :+
-  inc src+1
+  LDA (src),y
+  BEQ done
+  INY
+  BNE :+
+  INC src+1
 :
-  cmp #10
-  beq newline
-  sta PPUDATA
-  bne loop
+  CMP #10
+  BEQ newline
+  STA PPUDATA
+  BNE loop
 newline:
-  lda #32
-  clc
-  adc dstLo
-  sta dstLo
-  lda #0
-  adc dstHi
-  sta dstHi
-  sta PPUADDR
-  lda dstLo
-  sta PPUADDR
-  jmp loop
+  LDA #32
+  CLC
+  ADC dstLo
+  STA dstLo
+  LDA #0
+  ADC dstHi
+  STA dstHi
+  STA PPUADDR
+  LDA dstLo
+  STA PPUADDR
+  JMP loop
 done:
-  rts
+  RTS
 .endproc
 
 .segment "RODATA"
@@ -607,9 +724,9 @@ palette:
 
 sprites:
    .byt  $80,$02,$00,$80   ; ball?
-   .byt  $60,$04,$00,$10   ; paddle1 top
-   .byt  $68,$05,$00,$10   ; paddle1 mid
-   .byt  $70,$03,$00,$10   ; paddle1 bot
+   .byt  $30,$04,$00,$10   ; paddle1 top
+   .byt  $38,$05,$00,$10   ; paddle1 mid
+   .byt  $40,$03,$00,$10   ; paddle1 bot
    .byt  $80,$04,$00,$E0   ; paddle2 top
    .byt  $88,$05,$00,$E0
    .byt  $90,$03,$00,$E0   ; paddle2 bot
